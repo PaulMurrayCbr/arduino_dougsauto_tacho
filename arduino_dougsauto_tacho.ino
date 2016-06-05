@@ -33,34 +33,34 @@ class MyStepper {
 
       location += target > location ? 1 : -1;
 
-      // I turn on the HIGH before the low so that the 
+      // I turn on the HIGH before the low so that the
       // stepper is always being held.
 
       switch (location & 3) {
         case 0:
           digitalWrite(Apin,  HIGH);
-          
+
           digitalWrite(Bpin,  LOW);
           digitalWrite(_Apin, LOW);
           digitalWrite(_Bpin, LOW);
           break;
         case 1:
           digitalWrite(Bpin,  HIGH);
-          
+
           digitalWrite(Apin,  LOW);
           digitalWrite(_Apin, LOW);
           digitalWrite(_Bpin, LOW);
           break;
         case 2:
           digitalWrite(_Apin, HIGH);
-          
+
           digitalWrite(Apin,  LOW);
           digitalWrite(Bpin,  LOW);
           digitalWrite(_Bpin, LOW);
           break;
         case 3:
           digitalWrite(_Bpin, HIGH);
-          
+
           digitalWrite(Apin,  LOW);
           digitalWrite(Bpin,  LOW);
           digitalWrite(_Apin, LOW);
@@ -139,7 +139,20 @@ void dorandom() {
   static unsigned long tt;
   if (millis() - tt < 1000) return;
   tt = millis();
-  tacho.moveTo(random() % STEPS);
+
+  static byte b;
+  b++;
+  switch (b % 4) {
+    case 0:
+      tacho.moveTo(0);
+      break;
+    case 2:
+      tacho.moveTo(STEPS-1);
+      break;
+    default:
+      tacho.moveTo(random() % (STEPS/2) + (STEPS/4));
+      break;
+  }
 }
 
 
