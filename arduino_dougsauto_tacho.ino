@@ -99,8 +99,9 @@ class MyStepper {
 
 const int STEPS = 36;
 
-// my stepper is pretty slow, so I will use 10000us as the maximum step speed
-MyStepper tacho(3, 5, 6, 4, 10000);
+// my stepper is pretty slow, so I will use 5 millis as the maximum step speed
+// the instrument stepper can almost certainly run quite a bit quicker
+MyStepper tacho(3, 5, 6, 4, 5120);
 
 void setup() {
   Serial.begin(57600);
@@ -111,12 +112,10 @@ void setup() {
   // to zero the tacho, we move forward STEPS * 1.25 the stop and then back by STEPS exactly;
   tacho.moveTo(STEPS * 5 / 4);
   while (tacho.isMoving()) tacho.loop();
-  delay(250);
   tacho.zeroHere();
 
   tacho.moveTo(-STEPS);
   while (tacho.isMoving()) tacho.loop();
-  delay(250);
   tacho.zeroHere();
 
   // and I move the needle between 0 and the limit just so I can see it for myself.
@@ -124,12 +123,9 @@ void setup() {
   for (int i = 0; i < 3; i++) {
     tacho.moveTo(STEPS);
     while (tacho.isMoving()) tacho.loop();
-  delay(250);
     tacho.moveTo(0);
     while (tacho.isMoving()) tacho.loop();
-  delay(250);
   }
-
 }
 
 void loop() {
