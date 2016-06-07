@@ -99,9 +99,25 @@ class MyStepper {
 
 const int STEPS = 36;
 
-// my stepper is pretty slow, so I will use 5 millis as the maximum step speed
+// this is the frequency in Hz at which the steeper should be set to STEPS
+const double MAX_FREQ = 2050;
+
+// my stepper motor is pretty slow, so I will use 5 millis as the maximum step speed
 // the instrument stepper can almost certainly run quite a bit quicker
-MyStepper tacho(3, 5, 6, 4, 5120);
+MyStepper tacho(3, 5, 6, 4, 10000);
+
+// this is the gear to count the width of the pulses
+
+long pulseLengthUs;
+long lastPulseUs;
+
+
+void pulseISR() {
+  unsigned long pulseUs = micros();
+  // this does a rolling average of the pulse length. 
+  pulseLengthUs = (pulseLengthUs * 3 + (pulseUs - lastPulseUs)) / 4;
+  lastPulseUs = pulseUs;
+}
 
 void setup() {
   Serial.begin(57600);
@@ -126,34 +142,31 @@ void setup() {
     tacho.moveTo(0);
     while (tacho.isMoving()) tacho.loop();
   }
+
+  attachInterrupt(digitalPinToInterrupt(2), pulseISR, RISING);
+
 }
 
 void loop() {
   tacho.loop();
 
-  dorandom();
-}
+  noInterrupts();
+  unsigned long pulseCpy = pulseLengthUs;
+  interrupts();
 
-
-void dorandom() {
-  static unsigned long tt;
-  if (millis() - tt < 1000) return;
-  tt = millis();
-
-  static byte b;
-  b++;
-  switch (b % 4) {
-    case 0:
-      tacho.moveTo(0);
-      break;
-    case 2:
-      tacho.moveTo(STEPS-1);
-      break;
-    default:
-      tacho.moveTo(random() % (STEPS/2) + (STEPS/4));
-      break;
+  int newTarget;
+  if(pulseLengthUs == 0)
+  newTarget = 0;
+  else {
+    newTarget = 1000000.0 / (double)pulseCpy / MAX_FREQ * STEPS;
   }
-}
 
+  if(newTarget > STEPS) newTarget = STEPS;
+
+  if(newTarget > 0 && newTarget == tacho.target-1) return;
+  if(newTarget < STEPS && newTarget == tacho.target+1) return;
+  
+  tacho.moveTo(newTarget);
+}
 
 
