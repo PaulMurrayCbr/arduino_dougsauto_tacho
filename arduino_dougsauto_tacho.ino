@@ -115,6 +115,13 @@ const unsigned long NEEDLE_MAX_RATE_us = 6000;
 const int SAMPLE_LOW_PASS_FILTER = 4;
 
 /**
+ * 8000hz means a cycle lengh of 125us. This constant is a debouncer - the sketch will ignore 
+ * pulses that are closer than this to the previously detected pulse. 
+ */
+
+const unsigned int SAMPLE_BOUNCE_LIMIT_us = 50; 
+
+/**
    This value means that the sketch will not attempt to move the needle unless it has moved
    at least this far into the range of the next needle position segment.
 */
@@ -149,6 +156,11 @@ long lastPulseUs;
 
 void pulseISR() {
   unsigned long pulseUs = micros();
+  unsigned long widthUs = pulseUs - lastPulseUs;
+
+  // ignore glitches, potentially due to non-digital input on the pin
+  if(widthUs < SAMPLE_BOUNCE_LIMIT_us) return;
+  
   // this does a rolling average of the pulse length.
   pulseLengthUs = (pulseLengthUs * (SAMPLE_LOW_PASS_FILTER - 1) + (pulseUs - lastPulseUs)) / SAMPLE_LOW_PASS_FILTER;
   lastPulseUs = pulseUs;
