@@ -69,16 +69,7 @@ class MyStepper {
     }
 
     void moveTo(int _target) {
-      _target += zero;
-
-      if (_target == target) return;
-
-      if (location == target) {
-        lastMoveUs = ((unsigned int) micros()) - maxSpeedUs;
-      }
-
-      target = _target;
-
+     target = _target + zero;
     }
 
     void zeroHere() {
@@ -163,9 +154,6 @@ void loop() {
 
   if(newTarget > STEPS) newTarget = STEPS;
 
-  if(newTarget > 0 && newTarget == tacho.target-1) return;
-  if(newTarget < STEPS && newTarget == tacho.target+1) return;
-  
   tacho.moveTo(newTarget);
 }
 
