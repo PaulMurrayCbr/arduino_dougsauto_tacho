@@ -107,139 +107,140 @@ class MyStepper {
 
 };
 
+class Sampler {
+    // make this static because otherwise i have to malloc things, which is a pain
+    static const int RING_BUFFER_SIZE = 4;
+    const float LOWPASS_DAMPING;
+    const float MAX_FREQ;
+    const int STEPS;
+    const float NEEDLE_HYSTERESIS;
 
-////////////////////////////////////////////////////////////////////////////////
+    MyStepper &stepper;
 
-/*
-    OK. This section includes a number of constants that will help you smooth
-    the motion of the needle. As alsways, here's a trade off: the smoother you make the needle, \
-    the less responsive it will be
-*/
+    volatile long ringBufferUs[RING_BUFFER_SIZE];
+    volatile int ringBufferPos = 0;
+    volatile float avgPulseWidthUs;
 
+  public:
 
-/*  this constant governs how fast the needle moves. For my stepper, it's pretty slow. Your
-    instrument stepper should be much faster and use a much smaler value. If you make it too small,
-    the stepper will lose track of where zero is - it's registration will slip.
-*/
+    Sampler(const float LOWPASS_DAMPING, const float MAX_FREQ,  const int STEPS, const float NEEDLE_HYSTERESIS, MyStepper &stepper ) :
+      LOWPASS_DAMPING(LOWPASS_DAMPING) ,
+      MAX_FREQ(MAX_FREQ),
+      STEPS(STEPS),
+      NEEDLE_HYSTERESIS(NEEDLE_HYSTERESIS),
+      stepper(stepper)
+    {}
 
-/*
-   MOD - because this version of the sketch uses the in-between steps,
-   the stepper can move fatser
-*/
+    void pulseISR() {
+      unsigned long us = micros();
+      unsigned long pulseWidthUs = us - ringBufferUs[ringBufferPos];
+      ringBufferUs[ringBufferPos] = us;
+      if (++ringBufferPos >= RING_BUFFER_SIZE) {
+        ringBufferPos = 0;
+      }
 
-const unsigned long NEEDLE_MAX_RATE_us = 2000;
+      avgPulseWidthUs = LOWPASS_DAMPING * avgPulseWidthUs + (1 - LOWPASS_DAMPING) * pulseWidthUs / RING_BUFFER_SIZE;
+    }
 
-/**
-   This constant coverns the low pass filter on the sampling. A value of 1 means no filtering.
-   Higer values than this mean that the time between pulses gets averaged out, as a cost of the
-   value taking time to reach the real value
-*/
+    void setup() {
+      stepper.moveTo(STEPS * 5 / 4);
+      while (stepper.isMoving()) stepper.loop();
+      stepper.zeroHere();
 
-const int SAMPLE_LOW_PASS_FILTER = 4;
+      stepper.moveTo(-STEPS);
+      while (stepper.isMoving()) stepper.loop();
+      stepper.zeroHere();
 
-/**
-   8000hz means a cycle lengh of 125us. This constant is a debouncer - the sketch will ignore
-   pulses that are closer than this to the previously detected pulse.
-*/
+      // and I move the needle between 0 and the limit just so I can see it move.
+      stepper.moveTo(STEPS);
+      while (stepper.isMoving()) stepper.loop();
+      stepper.moveTo(0);
+      while (stepper.isMoving()) stepper.loop();
+    }
 
-const unsigned int SAMPLE_BOUNCE_LIMIT_us = 50;
+    void loop() {
+      // make this as fast as possible to reduce glitching
+      noInterrupts();
+      unsigned long avgPulseWidthCpyUs = avgPulseWidthUs;
+      interrupts();
 
-/**
-   This value means that the sketch will not attempt to move the needle unless it has moved
-   at least this far into the range of the next needle position segment.
-*/
+      double newTarget;
 
-const double NEEDLE_HYSTERESIS = .5;
+      if (avgPulseWidthCpyUs == 0)
+        newTarget = 0;
+      else {
+        newTarget = 1000000.0 / (double)avgPulseWidthCpyUs / MAX_FREQ * STEPS;
+      }
 
-////////////////////////////////////////////////////////////////////////////////
+      if (newTarget < 0) newTarget = 0;
+      else if (newTarget > STEPS) newTarget = STEPS;
 
-/**
-   This section inclues various bounds and settings that together determine
-   how the needle travels.
-*/
+      // hysteresis
+      if (newTarget < stepper.getTarget() - NEEDLE_HYSTERESIS || newTarget > stepper.getTarget() + 1 + NEEDLE_HYSTERESIS) {
+        stepper.moveTo(newTarget);
+      }
+    }
 
-/**
-   I have a 48-pole stepper, and I want the dial
-   to cover 3/4rds of the circle, so I am setting the steps to 48*3/4 = 36
-*/
+};
 
-/*
-   Mod - using the in-between steps, so the 48 is doubled
-*/
+MyStepper tacho(3, 5, 6, 4, 6000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
 
-const int STEPS = 48 * 2 * 3 / 4;
+Sampler tachoSampler(
+  .75, // low-pass damping. 0 means none, 1 means no signal at all
+  2050,   // max frequency
+  48 * 2 * 3 / 4, // number of steps on the stepper
+  .6, // hysteresis at .5, there is a microscopic chance of needle vibration, so set it to just over that
+  tacho // the stepper motor to which this instance is bound
+);
 
-// this is the frequency in Hz at which the steepper should be set to STEPS
-// note that
-const double MAX_FREQ = 2050;
+#ifdef YES_WE_HAVE_A_SECOND_GAUGE // comment this next section out
+// to define another gauge and senesor:
+MyStepper secondTacho(12, 11, 10, 9, 6000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
 
-MyStepper tacho(3, 5, 6, 4, NEEDLE_MAX_RATE_us);
+Sampler secondTachoSampler(
+  .75, // low-pass compression. 0 means none, 1 means no signal at all
+  2050,   // max frequency
+  48 * 2 * 3 / 4, // number of steps on the meter
+  .6, // hysteresis at .5, there is a microscopic chance of needle vibration, so set it to just over that
+  secondTacho // the stepper motor to which this instance is bound
+);
+#endif
 
-// this is the gear to count the width of the pulses
-
-long pulseLengthUs;
-long lastPulseUs;
-
-
-void pulseISR() {
-  unsigned long pulseUs = micros();
-  unsigned long widthUs = pulseUs - lastPulseUs;
-
-  // ignore glitches, potentially due to non-digital input on the pin
-  if (widthUs < SAMPLE_BOUNCE_LIMIT_us) return;
-
-  // this does a rolling average of the pulse length.
-  pulseLengthUs = (pulseLengthUs * (SAMPLE_LOW_PASS_FILTER - 1) + (pulseUs - lastPulseUs)) / SAMPLE_LOW_PASS_FILTER;
-  lastPulseUs = pulseUs;
+void pin2ISR() {
+  tachoSampler.pulseISR();
 }
+
+#ifdef YES_WE_HAVE_A_SECOND_GAUGE // comment this next section out
+void pin3ISR() {
+  secondTachoSampler.pulseISR();
+}
+#endif
 
 void setup() {
   tacho.setup();
+  tachoSampler.setup(); // the stepper must be set up before the sampler that uses it
+  pinMode(2, INPUT);
+  attachInterrupt(digitalPinToInterrupt(2), pin2ISR, RISING);
 
-  // to zero the tacho, we move forward STEPS * 1.25 the stop and then back by STEPS exactly
-  // this will zero it against the end stop at the limit of travel.
-
-  tacho.moveTo(STEPS * 5 / 4);
-  while (tacho.isMoving()) tacho.loop();
-  tacho.zeroHere();
-
-  tacho.moveTo(-STEPS);
-  while (tacho.isMoving()) tacho.loop();
-  tacho.zeroHere();
-
-  // and I move the needle between 0 and the limit just so I can see it move.
-  tacho.moveTo(STEPS);
-  while (tacho.isMoving()) tacho.loop();
-  tacho.moveTo(0);
-  while (tacho.isMoving()) tacho.loop();
-
-  // ok: hook up the tacho sensor.
-  attachInterrupt(digitalPinToInterrupt(2), pulseISR, RISING);
+#ifdef YES_WE_HAVE_A_SECOND_GAUGE // comment this next section out
+  secondTacho.setup();
+  secondTachoSampler.setup(); // the stepper must be set up before the sampler that uses it
+  // *******
+  // OBVIOUSLY THAT FIRST STEPPR NEEDS TO BE MOVED TO A DIFFERENT SET OF PINS FOR THIS TO WORK
+  // *******
+  pinMode(3, INPUT);
+  attachInterrupt(digitalPinToInterrupt(3), pin3ISR, RISING);
+#endif
 }
 
 void loop() {
   tacho.loop();
+  tachoSampler.loop();
 
-  // make this as fast as possible to reduce glitching
-  noInterrupts();
-  unsigned long pulseCpy = pulseLengthUs;
-  interrupts();
-
-  double newTarget;
-
-  if (pulseLengthUs == 0)
-    newTarget = 0;
-  else {
-    newTarget = 1000000.0 / (double)pulseCpy / MAX_FREQ * STEPS;
-  }
-
-  if (newTarget < 0) newTarget = 0;
-  else if (newTarget > STEPS) newTarget = STEPS;
-
-  // hysteresis
-  if (newTarget < tacho.getTarget() - NEEDLE_HYSTERESIS || newTarget > tacho.getTarget() + 1 + NEEDLE_HYSTERESIS) {
-    tacho.moveTo(newTarget);
-  }
+#ifdef YES_WE_HAVE_A_SECOND_GAUGE // comment this next section out
+  secondTacho.loop();
+  secondTachoSampler.loop();
+#endif
 }
 
 
