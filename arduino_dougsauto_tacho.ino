@@ -29,9 +29,7 @@ class MyStepper {
       }
 
       unsigned long nowUs =  micros();
-
       if (nowUs - lastMoveUs < maxSpeedUs) return;
-
       lastMoveUs = nowUs;
 
       location += target > location ? 1 : -1;
@@ -39,34 +37,54 @@ class MyStepper {
       // I turn on the HIGH before the low so that the
       // stepper is always being held.
 
-      switch (location & 3) {
+      switch (location & 7) {
         case 0:
           digitalWrite(Apin,  HIGH);
-
-          digitalWrite(Bpin,  LOW);
           digitalWrite(_Apin, LOW);
+          digitalWrite(Bpin,  LOW);
           digitalWrite(_Bpin, LOW);
           break;
         case 1:
-          digitalWrite(Bpin,  HIGH);
-
-          digitalWrite(Apin,  LOW);
+          digitalWrite(Apin,  HIGH);
           digitalWrite(_Apin, LOW);
+          digitalWrite(Bpin,  HIGH);
           digitalWrite(_Bpin, LOW);
           break;
         case 2:
-          digitalWrite(_Apin, HIGH);
-
           digitalWrite(Apin,  LOW);
-          digitalWrite(Bpin,  LOW);
+          digitalWrite(_Apin, LOW);
+          digitalWrite(Bpin,  HIGH);
           digitalWrite(_Bpin, LOW);
           break;
         case 3:
-          digitalWrite(_Bpin, HIGH);
-
           digitalWrite(Apin,  LOW);
+          digitalWrite(_Apin, HIGH);
+          digitalWrite(Bpin,  HIGH);
+          digitalWrite(_Bpin, LOW);
+          break;
+        case 4:
+          digitalWrite(Apin,  LOW);
+          digitalWrite(_Apin, HIGH);
           digitalWrite(Bpin,  LOW);
+          digitalWrite(_Bpin, LOW);
+          break;
+        case 5:
+          digitalWrite(Apin,  LOW);
+          digitalWrite(_Apin, HIGH);
+          digitalWrite(Bpin,  LOW);
+          digitalWrite(_Bpin, HIGH);
+          break;
+        case 6:
+          digitalWrite(Apin,  LOW);
           digitalWrite(_Apin, LOW);
+          digitalWrite(Bpin,  LOW);
+          digitalWrite(_Bpin, HIGH);
+          break;
+        case 7:
+          digitalWrite(Apin,  HIGH);
+          digitalWrite(_Apin, LOW);
+          digitalWrite(Bpin,  LOW);
+          digitalWrite(_Bpin, HIGH);
           break;
       }
     }
@@ -104,7 +122,12 @@ class MyStepper {
     the stepper will lose track of where zero is - it's registration will slip.
 */
 
-const unsigned long NEEDLE_MAX_RATE_us = 6000;
+/*
+   MOD - because this version of the sketch uses the in-between steps,
+   the stepper can move fatser
+*/
+
+const unsigned long NEEDLE_MAX_RATE_us = 2000;
 
 /**
    This constant coverns the low pass filter on the sampling. A value of 1 means no filtering.
@@ -115,11 +138,11 @@ const unsigned long NEEDLE_MAX_RATE_us = 6000;
 const int SAMPLE_LOW_PASS_FILTER = 4;
 
 /**
- * 8000hz means a cycle lengh of 125us. This constant is a debouncer - the sketch will ignore 
- * pulses that are closer than this to the previously detected pulse. 
- */
+   8000hz means a cycle lengh of 125us. This constant is a debouncer - the sketch will ignore
+   pulses that are closer than this to the previously detected pulse.
+*/
 
-const unsigned int SAMPLE_BOUNCE_LIMIT_us = 50; 
+const unsigned int SAMPLE_BOUNCE_LIMIT_us = 50;
 
 /**
    This value means that the sketch will not attempt to move the needle unless it has moved
@@ -131,19 +154,23 @@ const double NEEDLE_HYSTERESIS = .5;
 ////////////////////////////////////////////////////////////////////////////////
 
 /**
- * This section inclues various bounds and settings that together determine 
- * how the needle travels.
- */
+   This section inclues various bounds and settings that together determine
+   how the needle travels.
+*/
 
 /**
    I have a 48-pole stepper, and I want the dial
    to cover 3/4rds of the circle, so I am setting the steps to 48*3/4 = 36
 */
 
-const int STEPS = 48 * 3 / 4;
+/*
+   Mod - using the in-between steps, so the 48 is doubled
+*/
+
+const int STEPS = 48 * 2 * 3 / 4;
 
 // this is the frequency in Hz at which the steepper should be set to STEPS
-// note that 
+// note that
 const double MAX_FREQ = 2050;
 
 MyStepper tacho(3, 5, 6, 4, NEEDLE_MAX_RATE_us);
@@ -159,8 +186,8 @@ void pulseISR() {
   unsigned long widthUs = pulseUs - lastPulseUs;
 
   // ignore glitches, potentially due to non-digital input on the pin
-  if(widthUs < SAMPLE_BOUNCE_LIMIT_us) return;
-  
+  if (widthUs < SAMPLE_BOUNCE_LIMIT_us) return;
+
   // this does a rolling average of the pulse length.
   pulseLengthUs = (pulseLengthUs * (SAMPLE_LOW_PASS_FILTER - 1) + (pulseUs - lastPulseUs)) / SAMPLE_LOW_PASS_FILTER;
   lastPulseUs = pulseUs;
@@ -171,7 +198,7 @@ void setup() {
 
   // to zero the tacho, we move forward STEPS * 1.25 the stop and then back by STEPS exactly
   // this will zero it against the end stop at the limit of travel.
-  
+
   tacho.moveTo(STEPS * 5 / 4);
   while (tacho.isMoving()) tacho.loop();
   tacho.zeroHere();
