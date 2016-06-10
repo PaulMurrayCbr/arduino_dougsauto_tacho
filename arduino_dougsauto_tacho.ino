@@ -228,6 +228,71 @@ class TurnPinOnIfSamplerOverLimit {
 
 };
 
+/*
+
+   I need pin 13 to activate ONLY when the frequency is between 160 to 165 HZ so off
+   anything below 160 and off at anything above165 only on at 160 to 165 HZ.
+   but here is the difficult part. when the frequency is rising, when it passes
+   through 160 to 165 HZ pin 13 should not activate. it should only activate when the
+   frequency is decreasing as it passes from 165 to160HZ below 160HZ  it should be off.
+
+*/
+
+class TurnPinOnWhenFallingThroughWindow {
+  public:
+    const float lowerBoundHz;
+    const float upperBoundHz;
+    Sampler &sampler;
+    const byte pin;
+    enum State {
+      ABOVE_WINDOW = 3, IN_WINDOW = 2, BELOW_WINDOW = 1
+    } state;
+
+    TurnPinOnWhenFallingThroughWindow( const float lowerBoundHz,
+                                       const float upperBoundHz,
+                                       Sampler &sampler,
+                                       const byte pin) :
+      lowerBoundHz(lowerBoundHz),
+      upperBoundHz(upperBoundHz),
+      sampler(sampler),
+      pin(pin)
+    {}
+
+    void setup() {
+      pinMode(pin, OUTPUT);
+      digitalWrite(pin, LOW);
+      state = BELOW_WINDOW;
+    }
+
+    void loop() {
+      if (sampler.frequencyHz < lowerBoundHz) {
+        if (state != BELOW_WINDOW) {
+          digitalWrite(pin, LOW);
+        }
+        state = BELOW_WINDOW;
+      }
+      else if (sampler.frequencyHz > upperBoundHz) {
+        if (state != ABOVE_WINDOW) {
+          digitalWrite(pin, LOW);
+        }
+        state = ABOVE_WINDOW;
+      }
+      else  {
+        switch (state) {
+          case BELOW_WINDOW:
+            digitalWrite(pin, LOW);
+            break;
+          case IN_WINDOW:
+            // leave the pin as-is
+            break;
+          case ABOVE_WINDOW:
+            digitalWrite(pin, HIGH);
+            break;
+        }
+        state = IN_WINDOW;
+      }
+    }
+};
 
 MyStepper tacho(5, 7, 8, 6, 3000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
 MyStepper speedo(9, 11, 12, 10, 3000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
@@ -258,8 +323,11 @@ void pin3ISR() {
   speedoSampler.pulseISR();
 }
 
-// on-board LED goes on if speedo over 1000 and off when it drops below 950
-TurnPinOnIfSamplerOverLimit speedoLimit(950, 1000, speedoSampler, 13);
+// pin 4 goes on if speedo over 1000 and off when it drops below 950
+TurnPinOnIfSamplerOverLimit speedoLimit(950, 1000, speedoSampler, 4);
+
+// pin 13 goes on if tacho between 160 and 165 AND dropping
+TurnPinOnWhenFallingThroughWindow tachoLimit(160, 165, tachoSampler, 13);
 
 void setup() {
   tacho.setup();
@@ -273,6 +341,7 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(3), pin3ISR, RISING);
 
   speedoLimit.setup();
+  tachoLimit.setup();
 
   tacho.moveTo(tachoSampler.STEPS * 5 / 4);
   speedo.moveTo(speedoSampler.STEPS * 5 / 4);
@@ -299,6 +368,7 @@ void loop() {
   speedoSampler.loop();
 
   speedoLimit.loop();
+  tachoLimit.loop();
 
 }
 
