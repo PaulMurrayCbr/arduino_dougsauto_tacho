@@ -108,6 +108,7 @@ class MyStepper {
 };
 
 class Sampler {
+  public:
     // make this static because otherwise i have to malloc things, which is a pain
     static const int RING_BUFFER_SIZE = 50;
     const float LOWPASS_DAMPING;
@@ -126,7 +127,9 @@ class Sampler {
     volatile int ringBufferPos = 0;
     volatile float avgPulseWidthUs;
 
-  public:
+    // this is a value that it's safe to inspect from outside an interrupt
+    float avgPulseWidthCpyUs;
+    float frequencyHz;
 
     Sampler(const float LOWPASS_DAMPING, const float MAX_FREQ,  const float MIN_FREQ, const int STEPS, const float NEEDLE_HYSTERESIS, MyStepper &stepper ) :
       LOWPASS_DAMPING(LOWPASS_DAMPING) ,
@@ -142,7 +145,7 @@ class Sampler {
       if (++ringBufferPos >= RING_BUFFER_SIZE) {
         ringBufferPos = 0;
       }
-      
+
       mostRecentPulseUs = micros();
       unsigned long pulseWidthUs = mostRecentPulseUs - ringBufferUs[ringBufferPos];
       ringBufferUs[ringBufferPos] = mostRecentPulseUs;
@@ -153,45 +156,31 @@ class Sampler {
     }
 
     void setup() {
-      stepper.moveTo(STEPS * 5 / 4);
-      while (stepper.isMoving()) stepper.loop();
-      stepper.zeroHere();
-
-      stepper.moveTo(-STEPS);
-      while (stepper.isMoving()) stepper.loop();
-      stepper.zeroHere();
-
-
-      // and I move the needle between 0 and the limit just so I can see it move.
-      //      stepper.moveTo(STEPS);
-      //      while (stepper.isMoving()) stepper.loop();
-      //      stepper.moveTo(0);
-      //      while (stepper.isMoving()) stepper.loop();
     }
 
     void loop() {
       // make this as fast as possible to reduce glitching
       noInterrupts();
-      
+
       // if the mst recent pulse was a long time ago (as specified by ZERO_SPEED_us),
       // then we manually zero the speed
       if (micros() - mostRecentPulseUs > ZERO_SPEED_us && avgPulseWidthUs <= ZERO_SPEED_us) {
         avgPulseWidthUs = ZERO_SPEED_us * 2.0; // times two to give us plenty of slop
       }
 
-      // this needs to be in a nointerrupts block because 
+      // this needs to be in a nointerrupts block because
       // flat read and writes are not necessarily atomic
-      float avgPulseWidthCpyUs = avgPulseWidthUs;
+      avgPulseWidthCpyUs = avgPulseWidthUs;
       interrupts();
-      
+
       double newTarget;
 
       if (avgPulseWidthCpyUs == 0 || avgPulseWidthCpyUs >= ZERO_SPEED_us)
-        newTarget = 0;
-      else {
-        newTarget = 1000000.0 / avgPulseWidthCpyUs / MAX_FREQ * STEPS;
-      }
+        frequencyHz = 0;
+      else
+        frequencyHz = 1000000.0 / avgPulseWidthCpyUs;
 
+      newTarget = frequencyHz / MAX_FREQ * STEPS;
       if (newTarget < 0) newTarget = 0;
       else if (newTarget > STEPS) newTarget = STEPS;
 
@@ -202,6 +191,43 @@ class Sampler {
     }
 
 };
+
+class TurnPinOnIfSamplerOverLimit {
+  public:
+    const float lowerBoundHz;
+    const float upperBoundHz;
+    Sampler &sampler;
+    const byte pin;
+    boolean state;
+
+    TurnPinOnIfSamplerOverLimit( const float lowerBoundHz,
+                                 const float upperBoundHz,
+                                 Sampler &sampler,
+                                 const byte pin) :
+      lowerBoundHz(lowerBoundHz),
+      upperBoundHz(upperBoundHz),
+      sampler(sampler),
+      pin(pin)
+    {}
+
+    void setup() {
+      pinMode(pin, OUTPUT);
+      state = digitalRead(pin) != LOW;
+    }
+
+    void loop() {
+      if (state && sampler.frequencyHz < lowerBoundHz) {
+        state = false;
+        digitalWrite(pin, LOW);
+      }
+      else if (!state &&  sampler.frequencyHz >= upperBoundHz) {
+        state = true;
+        digitalWrite(pin, HIGH);
+      }
+    }
+
+};
+
 
 MyStepper tacho(5, 7, 8, 6, 3000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
 MyStepper speedo(9, 11, 12, 10, 3000); // pins 4,5,6,4, max rate 6000us because I have flattened my batteries :(
@@ -218,7 +244,7 @@ Sampler tachoSampler(
 Sampler speedoSampler(
   .75, // low-pass damping. 0 means none, 1 means no signal at all
   2050,   // max frequency
-   512,   // min frequency
+  512,   // min frequency
   48 * 2 * 3 / 4, // number of steps on the stepper
   .6, // hysteresis at .5, there is a microscopic chance of needle vibration, so set it to just over that
   speedo // the stepper motor to which this instance is bound
@@ -232,6 +258,9 @@ void pin3ISR() {
   speedoSampler.pulseISR();
 }
 
+// on-board LED goes on if speedo over 1000 and off when it drops below 950
+TurnPinOnIfSamplerOverLimit speedoLimit(950, 1000, speedoSampler, 13);
+
 void setup() {
   tacho.setup();
   tachoSampler.setup(); // the stepper must be set up before the sampler that uses it
@@ -242,6 +271,25 @@ void setup() {
   speedoSampler.setup(); // the stepper must be set up before the sampler that uses it
   pinMode(3, INPUT);
   attachInterrupt(digitalPinToInterrupt(3), pin3ISR, RISING);
+
+  speedoLimit.setup();
+
+  tacho.moveTo(tachoSampler.STEPS * 5 / 4);
+  speedo.moveTo(speedoSampler.STEPS * 5 / 4);
+  while (tacho.isMoving() || speedo.isMoving()) {
+    tacho.loop();
+    speedo.loop();
+  }
+  tacho.zeroHere();
+  speedo.zeroHere();
+  tacho.moveTo(-tachoSampler.STEPS);
+  speedo.moveTo(-speedoSampler.STEPS);
+  while (tacho.isMoving() || speedo.isMoving()) {
+    tacho.loop();
+    speedo.loop();
+  }
+  tacho.zeroHere();
+  speedo.zeroHere();
 }
 
 void loop() {
@@ -249,6 +297,9 @@ void loop() {
   tachoSampler.loop();
   speedo.loop();
   speedoSampler.loop();
+
+  speedoLimit.loop();
+
 }
 
 
