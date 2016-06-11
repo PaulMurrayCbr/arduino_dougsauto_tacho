@@ -169,7 +169,7 @@ class Sampler {
       }
 
       // this needs to be in a nointerrupts block because
-      // flat read and writes are not necessarily atomic
+      // float read and writes are not necessarily atomic
       avgPulseWidthCpyUs = avgPulseWidthUs;
       interrupts();
 
@@ -229,14 +229,12 @@ class TurnPinOnIfSamplerOverLimit {
 };
 
 /*
-
-   I need pin 13 to activate ONLY when the frequency is between 160 to 165 HZ so off
-   anything below 160 and off at anything above165 only on at 160 to 165 HZ.
-   but here is the difficult part. when the frequency is rising, when it passes
-   through 160 to 165 HZ pin 13 should not activate. it should only activate when the
-   frequency is decreasing as it passes from 165 to160HZ below 160HZ  it should be off.
-
-*/
+ *   I need pin 13 to activate ONLY when the frequency is between 160 to 165 HZ so off
+ *   anything below 160 and off at anything above165 only on at 160 to 165 HZ.
+ *   but here is the difficult part. when the frequency is rising, when it passes
+ *   through 160 to 165 HZ pin 13 should not activate. it should only activate when the
+ *   frequency is decreasing as it passes from 165 to160HZ below 160HZ  it should be off.
+ */
 
 class TurnPinOnWhenFallingThroughWindow {
   public:
@@ -331,17 +329,9 @@ TurnPinOnWhenFallingThroughWindow tachoLimit(160, 165, tachoSampler, 13);
 
 void setup() {
   tacho.setup();
-  tachoSampler.setup(); // the stepper must be set up before the sampler that uses it
-  pinMode(2, INPUT);
-  attachInterrupt(digitalPinToInterrupt(2), pin2ISR, RISING);
-
   speedo.setup();
-  speedoSampler.setup(); // the stepper must be set up before the sampler that uses it
-  pinMode(3, INPUT);
-  attachInterrupt(digitalPinToInterrupt(3), pin3ISR, RISING);
 
-  speedoLimit.setup();
-  tachoLimit.setup();
+  // perform zeroing before attaching anything else
 
   tacho.moveTo(tachoSampler.STEPS * 5 / 4);
   speedo.moveTo(speedoSampler.STEPS * 5 / 4);
@@ -359,6 +349,19 @@ void setup() {
   }
   tacho.zeroHere();
   speedo.zeroHere();
+
+  // and now attach all the other stuff
+  
+  tachoSampler.setup(); // the stepper must be set up before the sampler that uses it
+  pinMode(2, INPUT);
+  attachInterrupt(digitalPinToInterrupt(2), pin2ISR, RISING);
+
+  speedoSampler.setup(); // the stepper must be set up before the sampler that uses it
+  pinMode(3, INPUT);
+  attachInterrupt(digitalPinToInterrupt(3), pin3ISR, RISING);
+
+  speedoLimit.setup();
+  tachoLimit.setup();
 }
 
 void loop() {
